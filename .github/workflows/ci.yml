@@ -1,0 +1,88 @@
+name: ci
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+      - name: Tidy
+        run: go mod tidy
+      - name: Vet
+        run: go vet ./...
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+      - name: Run tests (race, coverage, JUnit)
+        continue-on-error: true
+        env:
+          GOBIN: ${{ github.workspace }}/bin
+        run: |
+          mkdir -p bin
+          export PATH="${{ github.workspace }}/bin:$PATH"
+          gotestsum --format=short-verbose --junitfile junit-report.xml -- -race -covermode=atomic -coverprofile=coverage.out ./...
+      - name: Publish JUnit Report
+        if: always()
+        uses: mikepenz/action-junit-report@v5
+        with:
+          report_paths: 'junit-report.xml'
+          check_name: 'JUnit Test Report'
+          require_tests: true
+          include_passed: true
+          detailed_summary: true
+          annotate_notice: true
+          fail_on_failure: true
+      - name: Generate coverage reports
+        if: always()
+        run: |
+          if [ -f coverage.out ]; then
+            go tool cover -func=coverage.out > coverage.txt || true
+            go tool cover -html=coverage.out -o coverage.html || true
+          else
+            echo "no coverage.out produced" > coverage.txt
+          fi
+          echo "JSON test log" && go test -json ./... > test-report.json || true
+      - name: Coverage summary (job summary & annotation)
+        if: always()
+        run: |
+          echo '### Test Coverage Summary' >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          if [ -f coverage.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -n 1 coverage.txt >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '<details><summary>Full Function Coverage</summary>' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat coverage.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo '</details>' >> $GITHUB_STEP_SUMMARY
+            echo '' >> $GITHUB_STEP_SUMMARY
+            echo '#### Lowest Coverage (<80%)' >> $GITHUB_STEP_SUMMARY
+            awk '/\t[0-9.]+%$/ { gsub(/%/,"",$NF); if ($(NF)+0 < 80.0) print }' coverage.txt | head -n 25 | sed 's/^/ - /' >> $GITHUB_STEP_SUMMARY || true
+          else
+            echo '_No coverage data available_' >> $GITHUB_STEP_SUMMARY
+          fi
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-and-coverage
+          path: |
+            coverage.out
+            coverage.txt
+            coverage.html
+            junit-report.xml
+            test-report.json
+      - name: Build
+        if: always()
+        run: go build ./...
