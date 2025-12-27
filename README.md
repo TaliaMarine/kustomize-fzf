@@ -1,6 +1,6 @@
 # kustomize-fzf
 
-Interactively filter Kubernetes YAML manifests with the power of `fzf`.
+Interactively filter Kubernetes YAML manifests outputed by Kustomize with the power of `fzf`.
 
 Intended usage is to combine with kustomize like:
 ```
